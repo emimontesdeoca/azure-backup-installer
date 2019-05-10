@@ -2,6 +2,10 @@
 
 Small tool that giving a .zip backup from Azure restores the bacpac and installs the website in IIS.
 
+## Help
+
+.NET Framework version is not working, help appreciated.
+
 ## App.config
 
 Before using you need to add an app.config with the name `AzureBackupInstaller.dll.config`.
@@ -15,6 +19,7 @@ Before using you need to add an app.config with the name `AzureBackupInstaller.d
     <add key="SQL_SEVERNAME" value="LAPTOP-EMI"/>
     <add key="SQL_USERNAME" value="emiliano"/>
     <add key="SQL_PASSWORD" value="emiliano"/>
+    <add key="SQL_REPLACE_WORD" value="....."/>
   </appSettings>
 </configuration>
 ```
@@ -24,5 +29,6 @@ Before using you need to add an app.config with the name `AzureBackupInstaller.d
  - `SQL_SEVERNAME` is the login name for the server
  - `SQL_USERNAME` is sql username
  - `SQL_PASSWORD` is sql passowrd
+ - `SQL_REPLACE_WORD` is the string to replace in the PortalAlias table
  
- [![Image from Gyazo](https://i.gyazo.com/78e7fe38db16bc7ce36ab30789571d23.jpg)](https://gyazo.com/78e7fe38db16bc7ce36ab30789571d23)
+ [![Image from Gyazo](https://i.gyazo.com/7259f59301b0b95e7a7c680036137ad8.png)](https://gyazo.com/7259f59301b0b95e7a7c680036137ad8)

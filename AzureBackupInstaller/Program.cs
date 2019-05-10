@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Data.SqlClient;
 using System.Diagnostics;
 using System.IO;
@@ -9,97 +10,176 @@ namespace AzureBackupInstaller
 {
     class Program
     {
+        private static string WEBSITE_NAME;
+        private static string WEBSITE_URL;
+        private static string ZIP_PATH;
+        private static string WEBSITES_PATH;
+
+        private static string SQL_SQLPACKAGE;
+        private static string SQL_SEVERNAME;
+        private static string SQL_DATABASENAME;
+        private static string SQL_BACPAC_PATH;
+        private static string SQL_USERNAME;
+        private static string SQL_PASSWORD;
+        private static string SQL_REPLACE_WORD;
+
+        private static string TEMP_PATH;
+
+        private static List<Exception> exceptions = new List<Exception>();
+
         static void Main(string[] args)
         {
             WriteHeader();
 
             #region ASK 
 
-            // COMMANDS TO ASK
-            string WEBSITE_NAME = AskForString("WEBSITE_NAME") ?? throw new Exception("Can't be null");
-            string WEBSITE_URL = AskForString("WEBSITE_URL") ?? throw new Exception("Can't be null");
-            string ZIP_PATH = AskForString("ZIP_PATH") ?? throw new Exception("Can't be null");
-            string WEBSITES_PATH = GetSetting("WEBSITES_PATH") ?? throw new Exception("Can't be null");
+            WEBSITE_NAME = AskForString("WEBSITE_NAME");
+            WEBSITE_URL = AskForString("WEBSITE_URL");
+            ZIP_PATH = AskForString("ZIP_PATH");
+            WEBSITES_PATH = GetSetting("WEBSITES_PATH");
 
             #endregion
 
             #region SQL VARIABLES
 
             // SQL VARIABLES
-            string SQL_SQLPACKAGE = GetSetting("SQL_SQLPACKAGE") ?? throw new Exception("Can't be null");
-            string SQL_SEVERNAME = GetSetting("SQL_SEVERNAME") ?? throw new Exception("Can't be null");
-            string SQL_DATABASENAME = WEBSITE_NAME ?? throw new Exception("Can't be null");
-            string SQL_BACPAC_PATH = string.Empty;
-            string SQL_USERNAME = GetSetting("SQL_USERNAME") ?? throw new Exception("Can't be null");
-            string SQL_PASSWORD = GetSetting("SQL_PASSWORD") ?? throw new Exception("Can't be null");
+            SQL_SQLPACKAGE = GetSetting("SQL_SQLPACKAGE");
+            SQL_SEVERNAME = GetSetting("SQL_SEVERNAME");
+            SQL_DATABASENAME = WEBSITE_NAME;
+            SQL_BACPAC_PATH = string.Empty;
+            SQL_USERNAME = GetSetting("SQL_USERNAME");
+            SQL_PASSWORD = GetSetting("SQL_PASSWORD");
+            SQL_REPLACE_WORD = GetSetting("SQL_REPLACE_WORD");
+
+            TEMP_PATH = @"temp\";
 
             #endregion
 
-            #region CHECKS
+            #region PRE LOGIC
 
-            // CONST
-            string TEMP_PATH = @"temp\" ?? throw new Exception("Can't be null");
+            Log($"Checking all properties");
+            Console.WriteLine();
 
-            // Decompress bacpac to temp folder
+            Check("WEBSITE_NAME");
+            Check("WEBSITE_URL");
+            Check("ZIP_PATH");
+            Check("WEBSITES_PATH");
+            Check("SQL_SQLPACKAGE");
+            Check("SQL_SEVERNAME");
+            Check("SQL_DATABASENAME");
+            Check("SQL_BACPAC_PATH");
+            Check("SQL_USERNAME");
+            Check("SQL_PASSWORD");
+            Check("SQL_REPLACE_WORD");
+            Check("TEMP_PATH");
 
-            Log($"Checking if '{TEMP_PATH}' exists");
-            if (!Directory.Exists(TEMP_PATH))
+            #endregion
+
+            #region CHECK IF SQLPACKAGE EXISTS
+
+            Runner<bool>(() => CheckSQLexplorer(), "Checking if 'sqlpackage.exe' exists");
+
+            #endregion
+
+            #region TEST CONNECTION TO DB
+
+            // Needs work since db doesn't exists
+
+            #endregion
+
+            if (AskToContinue($"There are {exceptions.Count} errors, do you want to continue?"))
             {
-                Log($"Creating '{TEMP_PATH}' folder");
-                Directory.CreateDirectory(TEMP_PATH);
+                Runner<bool>(() => Cleanup(), "Cleaning temp folder");
+                Runner<bool>(() => CheckTempFolder(), "Creating temp folder");
+
+                #region WEBSITE
+
+                Runner<bool>(() => Decompression(), "Extracting zip to temp folder");
+                Runner<bool>(() => CopyDecompressedFolder(), "Copying wwwroot folder to IIS websites folder");
+                Runner<bool>(() => UpdateWebconfig(), "Updating webconfig");
+                Runner<bool>(() => AddToIIS(), "Adding website to IIS");
+
+                #endregion
+
+                #region SQL
+
+                Runner<bool>(() => ImportBacpac(), "Importing bacpac to database");
+                Runner<bool>(() => UpdatePortalAlias(), "Updating PortalAlias table");
+
+                #endregion
+            }
+            else
+            {
             }
 
-            #endregion
+            // Cleanup
+            Runner<bool>(() => Cleanup(), "Cleaning temp folder");
 
-            #region WEBSITE
+            Log("Press a key to exit");
+            Console.ReadLine();
+        }
 
-            Log($"Starting website '{WEBSITE_NAME}'");
+        #region BACKUP FUNCTIONS
 
-            #region DECOMPRESSION
+        private static bool CheckTempFolder()
+        {
+            try
+            {
+                if (!Directory.Exists(TEMP_PATH))
+                {
+                    Directory.CreateDirectory(TEMP_PATH);
+                }
 
+                return true;
+            }
+            catch (Exception e)
+            {
+                exceptions.Add(e);
+                return false;
+            }
+        }
+
+        private static bool Decompression()
+        {
             //Decompress folder to C:Websites / WEBSITES_PATH
             try
             {
                 string path = Path.Combine(TEMP_PATH, WEBSITE_NAME);
                 if (Directory.Exists(path))
                     Directory.Delete(path, true);
-                Log($"Extracting '{ZIP_PATH}' to '{path}'");
                 ZipFile.ExtractToDirectory(ZIP_PATH, path);
-                Log($"Extraction finished");
+                return true;
             }
             catch (Exception e)
             {
-                throw;
+                exceptions.Add(e);
+                return false;
             }
+        }
 
-            #endregion
-
-            #region COPY
-
-            // Copy from temp 
-            string tempPath = Path.Combine(TEMP_PATH, WEBSITE_NAME);
-            string wwwrootPath = Path.Combine(tempPath, @"fs\site\wwwroot\");
-            string newFolderName = Path.Combine(WEBSITES_PATH, WEBSITE_NAME);
-
+        private static bool CopyDecompressedFolder()
+        {
             try
             {
-                Log($"Copying '{tempPath}' to '{newFolderName}'");
+                // Copy from temp 
+                string tempWebsitePath = Path.Combine(TEMP_PATH, WEBSITE_NAME);
+                string wwwrootPath = Path.Combine(tempWebsitePath, @"fs\site\wwwroot\");
+                string newFolderName = Path.Combine(WEBSITES_PATH, WEBSITE_NAME);
                 DirectoryCopy(wwwrootPath, newFolderName, true);
-                Log($"Copying finished");
+                return true;
             }
             catch (Exception e)
             {
-                throw;
+                exceptions.Add(e);
+                return false;
             }
+        }
 
-            #endregion
-
-            #region WEBCONFIG
-            // Replace connectionString in web.config
-
+        private static bool UpdateWebconfig()
+        {
             try
             {
-                Log($"Updating web.config of '{WEBSITE_URL}'");
+                string newFolderName = Path.Combine(WEBSITES_PATH, WEBSITE_NAME);
                 string webconfigPath = Path.Combine(newFolderName, "web.config");
                 string webconfigInner = File.ReadAllText(webconfigPath);
 
@@ -114,25 +194,23 @@ namespace AzureBackupInstaller
 
                 string finalInnerWebConfig = $"{splitFirst}{newConnectionString}{splitSecond}";
 
-                File.WriteAllText(webconfigPath,finalInnerWebConfig);
+                File.WriteAllText(webconfigPath, finalInnerWebConfig);
 
-                
-                Log($"Updating finished");
+                return true;
             }
-            catch (Exception)
+            catch (Exception e)
             {
-
-                throw;
+                exceptions.Add(e);
+                return false;
             }
+        }
 
-            #endregion
-
-            #region IIS ADDITION
-            // Add to IIS
-
+        private static bool AddToIIS()
+        {
             try
             {
-                Log($"Adding '{WEBSITE_URL}' to IIS");
+                string newFolderName = Path.Combine(WEBSITES_PATH, WEBSITE_NAME);
+
                 var process = new Process()
                 {
                     StartInfo = new ProcessStartInfo
@@ -144,29 +222,23 @@ namespace AzureBackupInstaller
                 };
                 process.Start();
                 process.WaitForExit();
-                Log($"Addition finished");
+                return true;
             }
-            catch (Exception)
+            catch (Exception e)
             {
-
-                throw;
+                exceptions.Add(e);
+                return false;
             }
+        }
 
-            #endregion
-
-            #endregion
-
-            #region SQL
-
-            #region IMPORT BACPAC
-
-            // Restore bacpac
-            SQL_BACPAC_PATH = Path.Combine(tempPath, @"hotelequia-backend-dev.bacpac");
-
+        private static bool ImportBacpac()
+        {
             // Restore in database
             try
             {
-                Log($"Importing '{SQL_BACPAC_PATH}' to server '{SQL_SEVERNAME}' with name '{SQL_DATABASENAME}'");
+                // Restore bacpac
+                string tempWebsitePath = Path.Combine(TEMP_PATH, WEBSITE_NAME);
+                SQL_BACPAC_PATH = Path.Combine(System.AppDomain.CurrentDomain.BaseDirectory, System.IO.Directory.GetFiles(tempWebsitePath, "*.bacpac")[0]);
 
                 var process = new Process()
                 {
@@ -179,66 +251,170 @@ namespace AzureBackupInstaller
                 };
                 process.Start();
                 process.WaitForExit();
-                Log($"Importing finished");
+                return true;
             }
             catch (Exception e)
             {
-
-                throw;
+                exceptions.Add(e);
+                return false;
             }
+        }
 
-            #endregion
-
-            #region UPDATE PORTALALIAS
-
+        private static bool UpdatePortalAlias()
+        {
             // Replace PortalAlias
-            string queryString = $"UPDATE dbo.PortalAlias SET [HTTPAlias] = replace([HTTPAlias], 'admindev.hotelequia.com', '{WEBSITE_URL}') WHERE [HTTPAlias] LIKE 'admindev.hotelequia.com%'; ";
+            string queryString = $"UPDATE dbo.PortalAlias SET [HTTPAlias] = replace([HTTPAlias], '{SQL_REPLACE_WORD}', '{WEBSITE_URL}') WHERE [HTTPAlias] LIKE '{SQL_REPLACE_WORD}%'; ";
             string connectionString = $"Server={SQL_SEVERNAME};Database={SQL_DATABASENAME}; User ID={SQL_USERNAME};Password={SQL_PASSWORD};";
 
-            Log($"Connecting to database");
+            //Log($"Connecting to database");
             using (SqlConnection connection = new SqlConnection(connectionString))
             {
                 try
                 {
-                    Log($"Updating 'dbo.PortalAlias' values with new url '{WEBSITE_URL}'");
                     SqlCommand command = new SqlCommand(queryString, connection);
                     connection.Open();
                     command.ExecuteNonQuery();
-                    Log($"Updating finished");
                     connection.Close();
+                    return true;
                 }
                 catch (Exception e)
                 {
                     connection.Close();
-                    throw;
+                    exceptions.Add(e);
+                    return false;
                 }
-            } 
-
-            #endregion
-
-            #endregion
-
-            #region END
-
-            // Cleanup
-            Log($"Deleting temp folder");
-            Directory.Delete("temp", true);
-            Log($"Deleting finished");
-            Log($"Backup installer finished, press enter to exit");
-
-            #endregion
-
-            Console.ReadLine();
+            }
         }
 
+        private static bool Cleanup()
+        {
+            try
+            {
+                Directory.Delete("temp", true);
+                return true;
+            }
+            catch (Exception e)
+            {
+                exceptions.Add(e);
+                return false;
+            }
+        }
+
+        private static bool CheckSQLexplorer()
+        {
+            return File.Exists(SQL_SQLPACKAGE);
+        }
+
+        private static bool CheckSQLConnection()
+        {
+            string connectionString = $"Server={SQL_SEVERNAME};Database={SQL_DATABASENAME}; User ID={SQL_USERNAME};Password={SQL_PASSWORD};";
+
+            //Log($"Connecting to database");
+            using (SqlConnection connection = new SqlConnection(connectionString))
+            {
+                try
+                {
+                    connection.Open();
+                    connection.Close();
+                    return true;
+                }
+                catch (Exception e)
+                {
+                    connection.Close();
+                    exceptions.Add(e);
+                    return false;
+                }
+            }
+        }
+        #endregion
+
+        #region METHODS
+
+        public static void Runner<T>(Func<bool> funcToRun, string message)
+        {
+
+            Console.Write($"[{DateTime.Now}] {message}... ");
+            var result = funcToRun();
+
+            if (result)
+            {
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.Write($"\t[SUCCESS]");
+                Console.ForegroundColor = ConsoleColor.White;
+                Console.Write($"!");
+            }
+            else
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.Write($"\t[ERROR]");
+                Console.ForegroundColor = ConsoleColor.White;
+                Console.Write($"!");
+            }
+
+            Console.WriteLine();
+        }
+
+        private static void Check(string property)
+        {
+            Console.Write($"[{DateTime.Now}] Checking property '{property}'... \t");
+
+            if (String.IsNullOrEmpty(property) || String.IsNullOrWhiteSpace(property))
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.Write($"[ERROR]");
+                Console.ForegroundColor = ConsoleColor.White;
+                Console.Write($"!");
+            }
+            else
+            {
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.Write($"[SUCCESS]");
+                Console.ForegroundColor = ConsoleColor.White;
+                Console.Write($"!");
+            }
+            Console.WriteLine();
+        }
+
+        #endregion
 
         #region UTILS
 
         private static string AskForString(string message)
         {
-            //Console.WriteLine();
-            Console.Write($"[{DateTime.Now}] {message}: ");
-            return Console.ReadLine();
+            try
+            {
+                //Console.WriteLine();
+                Console.Write($"[{DateTime.Now}] {message}: ");
+                return Console.ReadLine();
+            }
+            catch (Exception e)
+            {
+                exceptions.Add(e);
+                return null;
+            }
+        }
+
+        private static bool AskToContinue(string message)
+        {
+            try
+            {
+                Console.WriteLine();
+                Console.Write($"[{DateTime.Now}] {message} (Y/n): ");
+                string res = Console.ReadLine();
+                Console.WriteLine();
+
+                switch (res.ToLower())
+                {
+                    case "y":
+                        return true;
+                    default:
+                        return false;
+                }
+            }
+            catch (Exception e)
+            {
+                return false;
+            }
         }
 
         private static void Log(string message)
@@ -248,7 +424,25 @@ namespace AzureBackupInstaller
 
         private static string GetSetting(string key)
         {
-            return System.Configuration.ConfigurationManager.AppSettings[key];
+            try
+            {
+                string res = System.Configuration.ConfigurationManager.AppSettings[key];
+
+                if (string.IsNullOrEmpty(res))
+                {
+                    throw new Exception();
+                }
+                else
+                {
+                    return res;
+                }
+            }
+            catch (Exception e)
+            {
+                exceptions.Add(e);
+                return null;
+            }
+
         }
 
         private static void DirectoryCopy(string sourceDirName, string destDirName, bool copySubDirs)
@@ -291,6 +485,8 @@ namespace AzureBackupInstaller
 
         private static void WriteHeader()
         {
+            Console.ForegroundColor = ConsoleColor.White;
+
             Console.WriteLine(@" ____             _                  _           _        _ _           ");
             Console.WriteLine(@"|  _ \           | |                (_)         | |      | | |          ");
             Console.WriteLine(@"| |_) | __ _  ___| | ___   _ _ __    _ _ __  ___| |_ __ _| | | ___ _ __ ");
@@ -299,6 +495,8 @@ namespace AzureBackupInstaller
             Console.WriteLine(@"|____/ \__,_|\___|_|\_\\__,_| .__/  |_|_| |_|___/\__\__,_|_|_|\___|_|   ");
             Console.WriteLine(@"                             | |                                         ");
             Console.WriteLine(@"                             |_|                                         ");
+            Console.WriteLine();
+            Console.WriteLine("Source code: https://github.com/emimontesdeoca/azure-backup-installer");
             Console.WriteLine();
         }
 
