@@ -246,7 +246,7 @@ namespace AzureBackupInstaller
                     {
                         FileName = SQL_SQLPACKAGE,
                         Arguments = $"/a:Import /tsn:{SQL_SEVERNAME} /tdn:{SQL_DATABASENAME} /tu:{SQL_USERNAME} /tp:{SQL_PASSWORD} /sf:{SQL_BACPAC_PATH}",
-                        CreateNoWindow = true
+                        CreateNoWindow = false
                     }
                 };
                 process.Start();
