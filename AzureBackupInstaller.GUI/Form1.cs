@@ -1,125 +1,78 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel;
+using System.Data;
+using System.Drawing;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System;
+using System.Collections.Generic;
 using System.Data.SqlClient;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Windows.Forms;
 
-namespace AzureBackupInstaller
+namespace AzureBackupInstaller.GUI
 {
-    class Program
+    public partial class Form1 : Form
     {
-        private static string WEBSITE_NAME;
-        private static string WEBSITE_URL;
-        private static string ZIP_PATH;
-        private static string WEBSITES_PATH;
-
-        private static string SQL_SQLPACKAGE;
-        private static string SQL_SEVERNAME;
-        private static string SQL_DATABASENAME;
-        private static string SQL_BACPAC_PATH;
-        private static string SQL_USERNAME;
-        private static string SQL_PASSWORD;
-        private static string SQL_REPLACE_WORD;
 
         private static string TEMP_PATH;
-
         private static List<Exception> exceptions = new List<Exception>();
 
-        static void Main(string[] args)
+        public Form1()
         {
-            WriteHeader();
-
-            #region ASK 
-
-            WEBSITE_NAME = AskForString("WEBSITE_NAME");
-            WEBSITE_URL = AskForString("WEBSITE_URL");
-            ZIP_PATH = AskForString("ZIP_PATH");
-            WEBSITES_PATH = GetSetting("WEBSITES_PATH");
-
-            #endregion
-
-            #region SQL VARIABLES
-
-            // SQL VARIABLES
-            SQL_SQLPACKAGE = GetSetting("SQL_SQLPACKAGE");
-            SQL_SEVERNAME = GetSetting("SQL_SEVERNAME");
-            SQL_DATABASENAME = WEBSITE_NAME;
-            SQL_BACPAC_PATH = string.Empty;
-            SQL_USERNAME = GetSetting("SQL_USERNAME");
-            SQL_PASSWORD = GetSetting("SQL_PASSWORD");
-            SQL_REPLACE_WORD = GetSetting("SQL_REPLACE_WORD");
-
-            TEMP_PATH = @"temp\";
-
-            #endregion
-
-            #region PRE LOGIC
-
-            Log($"Checking all properties");
-            Console.WriteLine();
-
-            Check("WEBSITE_NAME");
-            Check("WEBSITE_URL");
-            Check("ZIP_PATH");
-            Check("WEBSITES_PATH");
-            Check("SQL_SQLPACKAGE");
-            Check("SQL_SEVERNAME");
-            Check("SQL_DATABASENAME");
-            Check("SQL_BACPAC_PATH");
-            Check("SQL_USERNAME");
-            Check("SQL_PASSWORD");
-            Check("SQL_REPLACE_WORD");
-            Check("TEMP_PATH");
-
-            #endregion
-
-            #region CHECK IF SQLPACKAGE EXISTS
-
-            Runner<bool>(() => CheckSQLexplorer(), "Checking if 'sqlpackage.exe' exists");
-
-            #endregion
-
-            #region TEST CONNECTION TO DB
-
-            // Needs work since db doesn't exists
-
-            #endregion
-
-            if (AskToContinue($"There are {exceptions.Count} errors, do you want to continue?"))
-            {
-                Runner<bool>(() => Cleanup(), "Cleaning temp folder");
-                Runner<bool>(() => CheckTempFolder(), "Creating temp folder");
-
-                #region WEBSITE
-
-                Runner<bool>(() => Decompression(), "Extracting zip to temp folder");
-                Runner<bool>(() => CopyDecompressedFolder(), "Copying wwwroot folder to IIS websites folder");
-                Runner<bool>(() => UpdateWebconfig(), "Updating webconfig");
-                Runner<bool>(() => AddToIIS(), "Adding website to IIS");
-
-                #endregion
-
-                #region SQL
-
-                Runner<bool>(() => ImportBacpac(), "Importing bacpac to database");
-                Runner<bool>(() => UpdatePortalAlias(), "Updating PortalAlias table");
-
-                #endregion
-            }
-            else
-            {
-            }
-
-            // Cleanup
-            Runner<bool>(() => Cleanup(), "Cleaning temp folder");
-
-            Log("Press a key to exit");
-            Console.ReadLine();
+            InitializeComponent();
         }
 
-        #region BACKUP FUNCTIONS
+        private void btn_install_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void btn_zip_browse_Click(object sender, EventArgs e)
+        {
+            using (var fbd = new FolderBrowserDialog())
+            {
+                DialogResult result = fbd.ShowDialog();
+
+                if (result == DialogResult.OK && !string.IsNullOrWhiteSpace(fbd.SelectedPath))
+                {
+                    txt_zip.Text = fbd.SelectedPath.ToString();
+                }
+            }
+        }
+
+        private void btn_iisfolder_browse_Click(object sender, EventArgs e)
+        {
+            using (var fbd = new FolderBrowserDialog())
+            {
+                DialogResult result = fbd.ShowDialog();
+
+                if (result == DialogResult.OK && !string.IsNullOrWhiteSpace(fbd.SelectedPath))
+                {
+                    txt_iisfolder.Text = fbd.SelectedPath.ToString();
+                }
+            }
+        }
+
+        private void btn_package_location_Click(object sender, EventArgs e)
+        {
+            using (var fbd = new FolderBrowserDialog())
+            {
+                DialogResult result = fbd.ShowDialog();
+
+                if (result == DialogResult.OK && !string.IsNullOrWhiteSpace(fbd.SelectedPath))
+                {
+                    txt_sqlpackage.Text = fbd.SelectedPath.ToString();
+                }
+            }
+        }
+
+        #region Functions
 
         private static bool CheckTempFolder()
         {
@@ -144,10 +97,10 @@ namespace AzureBackupInstaller
             //Decompress folder to C:Websites / WEBSITES_PATH
             try
             {
-                string path = Path.Combine(TEMP_PATH, WEBSITE_NAME);
+                string path = Path.Combine(TEMP_PATH, txt_websitename.Text);
                 if (Directory.Exists(path))
                     Directory.Delete(path, true);
-                ZipFile.ExtractToDirectory(ZIP_PATH, path);
+                ZipFile.ExtractToDirectory(txt_zip.Text, path);
                 return true;
             }
             catch (Exception e)
@@ -162,9 +115,9 @@ namespace AzureBackupInstaller
             try
             {
                 // Copy from temp 
-                string tempWebsitePath = Path.Combine(TEMP_PATH, WEBSITE_NAME);
+                string tempWebsitePath = Path.Combine(TEMP_PATH, txt_websitename.Text);
                 string wwwrootPath = Path.Combine(tempWebsitePath, @"fs\site\wwwroot\");
-                string newFolderName = Path.Combine(WEBSITES_PATH, WEBSITE_NAME);
+                string newFolderName = Path.Combine(txt_iisfolder.Text, txt_websitename.Text);
                 DirectoryCopy(wwwrootPath, newFolderName, true);
                 return true;
             }
@@ -179,7 +132,7 @@ namespace AzureBackupInstaller
         {
             try
             {
-                string newFolderName = Path.Combine(WEBSITES_PATH, WEBSITE_NAME);
+                string newFolderName = Path.Combine(WEBSITES_PATH, txt_websitename.Text);
                 string webconfigPath = Path.Combine(newFolderName, "web.config");
                 string webconfigInner = File.ReadAllText(webconfigPath);
 
@@ -209,14 +162,14 @@ namespace AzureBackupInstaller
         {
             try
             {
-                string newFolderName = Path.Combine(WEBSITES_PATH, WEBSITE_NAME);
+                string newFolderName = Path.Combine(WEBSITES_PATH, txt_websitename.Text);
 
                 var process = new Process()
                 {
                     StartInfo = new ProcessStartInfo
                     {
                         FileName = @"C:\Windows\System32\inetsrv\appcmd.exe",
-                        Arguments = $"add site /name:{WEBSITE_NAME} /physicalPath:{newFolderName} /bindings:http/*:80:{WEBSITE_URL}",
+                        Arguments = $"add site /name:{txt_websitename.Text} /physicalPath:{newFolderName} /bindings:http/*:80:{WEBSITE_URL}",
                         CreateNoWindow = true
                     }
                 };
@@ -237,7 +190,7 @@ namespace AzureBackupInstaller
             try
             {
                 // Restore bacpac
-                string tempWebsitePath = Path.Combine(TEMP_PATH, WEBSITE_NAME);
+                string tempWebsitePath = Path.Combine(TEMP_PATH, txt_websitename.Text);
                 SQL_BACPAC_PATH = Path.Combine(System.AppDomain.CurrentDomain.BaseDirectory, System.IO.Directory.GetFiles(tempWebsitePath, "*.bacpac")[0]);
 
                 var process = new Process()
@@ -333,7 +286,7 @@ namespace AzureBackupInstaller
 
         #endregion
 
-        #region METHODS
+        #region Methods
 
         public static void Runner<T>(Func<bool> funcToRun, string message)
         {
@@ -382,72 +335,12 @@ namespace AzureBackupInstaller
 
         #endregion
 
-        #region UTILS
 
-        private static string AskForString(string message)
-        {
-            try
-            {
-                //Console.WriteLine();
-                Console.Write($"[{DateTime.Now}] {message}: ");
-                return Console.ReadLine();
-            }
-            catch (Exception e)
-            {
-                exceptions.Add(e);
-                return null;
-            }
-        }
-
-        private static bool AskToContinue(string message)
-        {
-            try
-            {
-                Console.WriteLine();
-                Console.Write($"[{DateTime.Now}] {message} (Y/n): ");
-                string res = Console.ReadLine();
-                Console.WriteLine();
-
-                switch (res.ToLower())
-                {
-                    case "y":
-                        return true;
-                    default:
-                        return false;
-                }
-            }
-            catch (Exception e)
-            {
-                return false;
-            }
-        }
+        #region Utils
 
         private static void Log(string message)
         {
             Console.WriteLine($"[{DateTime.Now}] {message}...");
-        }
-
-        private static string GetSetting(string key)
-        {
-            try
-            {
-                string res = System.Configuration.ConfigurationManager.AppSettings[key];
-
-                if (string.IsNullOrEmpty(res))
-                {
-                    throw new Exception();
-                }
-                else
-                {
-                    return res;
-                }
-            }
-            catch (Exception e)
-            {
-                exceptions.Add(e);
-                return null;
-            }
-
         }
 
         private static void DirectoryCopy(string sourceDirName, string destDirName, bool copySubDirs)
@@ -488,24 +381,7 @@ namespace AzureBackupInstaller
             }
         }
 
-        private static void WriteHeader()
-        {
-            Console.ForegroundColor = ConsoleColor.White;
-
-            Console.WriteLine(@" ____             _                  _           _        _ _           ");
-            Console.WriteLine(@"|  _ \           | |                (_)         | |      | | |          ");
-            Console.WriteLine(@"| |_) | __ _  ___| | ___   _ _ __    _ _ __  ___| |_ __ _| | | ___ _ __ ");
-            Console.WriteLine(@"|  _ < / _` |/ __| |/ / | | | '_ \  | | '_ \/ __| __/ _` | | |/ _ \ '__|");
-            Console.WriteLine(@"| |_) | (_| | (__|   <| |_| | |_) | | | | | \__ \ || (_| | | |  __/ |   ");
-            Console.WriteLine(@"|____/ \__,_|\___|_|\_\\__,_| .__/  |_|_| |_|___/\__\__,_|_|_|\___|_|   ");
-            Console.WriteLine(@"                             | |                                         ");
-            Console.WriteLine(@"                             |_|                                         ");
-            Console.WriteLine();
-            Console.WriteLine("Source code: https://github.com/emimontesdeoca/azure-backup-installer");
-            Console.WriteLine();
-        }
 
         #endregion
-
     }
 }
